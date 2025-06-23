@@ -11,6 +11,7 @@ event_planning_data = {
     "invitation_info": "",
     "whatsapp_status": "",
     "email_status": "",
+    "design_info": "",  # Added to store design templates
     "current_step": "start"
 }
 

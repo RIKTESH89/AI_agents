@@ -6,32 +6,17 @@ from data import event_planning_data
 
 def communication_agent(state: AgentState, communication_model) -> AgentState:
     """
-    Enhanced communication agent that intelligently drafts and sends invitations. Uses the 'invite_people' tool for drafting invitations and then asks the design_agent to create different templates and then use the 'whatsapp_message' tool for sending informal invitations via WhatsApp. For formal events, it uses the 'email_message' tool.
+    A state-aware communication agent that handles a multi-step invitation process.
+    1. Drafts the invitation text.
+    2. Waits for the design agent to create templates.
+    3. Sends the final invitation with designs via the appropriate channel.
     """
     messages = state["messages"]
     user_request = event_planning_data.get("user_request", "")
-    invitation_content = event_planning_data.get("invitation_info", "No invitation has been drafted yet.")
-    
-    # Updated system prompt to include the 'invite_people' tool.
-    system_prompt = SystemMessage(content=f"""You are the Communication Agent. Your role is to handle all outgoing messages and invitations for the event.
+    invitation_content = event_planning_data.get("invitation_info")
+    design_content = event_planning_data.get("design_info")
 
-Original user request: "{user_request}"
-Current invitation content prepared by the scheduler: "{invitation_content}"
-
-You have 3 tools at your disposal:
-1.  **invite_people**: To generate or refine the text and details of an invitation. This should be your first step.
-2.  **whatsapp_message**: To send informal invitations or messages (e.g., for casual birthdays).
-3.  **email_message**: To send formal invitations or messages (e.g., for business meetings).
-
-Your workflow is as follows:
-1.  First, use the `invite_people` tool to generate the perfect invitation text based on the event details.
-2.  After the invitation text is complete, use the `invite_designing` tool to generate different templates for the event.
-2.  Once you have the final invitation text, decide on the best channel. Use `whatsapp_message` for casual events and `email_message` for formal ones. For events like weddings, you might use both.
-3.  Execute the sending tool(s) with the generated message.
-
-After sending, summarize the communication actions taken. If messages have already been sent, simply state that communication is complete.""")
-    
-    # Check if communication tasks have already been completed in a previous step.
+    # Check if the process is already complete
     if event_planning_data.get("whatsapp_status") or event_planning_data.get("email_status"):
         summary = "📱 COMMUNICATION COMPLETED: Invitations have already been sent."
         return {
@@ -39,15 +24,43 @@ After sending, summarize the communication actions taken. If messages have alrea
             "current_agent": "communication",
             "next_action": "end"
         }
-        
+
+    # Scenario 1: Invitation not drafted yet.
+    if not invitation_content:
+        system_prompt = SystemMessage(content=f"""You are the Communication Agent, stage 1. Your first job is to draft the invitation text.
+
+Original user request: "{user_request}"
+Plan details have been gathered by the scheduler.
+
+Your workflow is as follows:
+1.  Use the `invite_people` tool to generate the perfect invitation text based on the event details in the user request.
+This is your only task in this step. The designer will take over after this.""")
+    
+    # Scenario 2: Invitation is drafted, but no designs yet. This state should not be handled by this agent.
+    # The routing will handle passing control to the design agent.
+
+    # Scenario 3: Invitation and Designs are ready. Time to send.
+    elif invitation_content and design_content:
+        system_prompt = SystemMessage(content=f"""You are the Communication Agent, stage 2. The invitation text and design templates are ready. Your final job is to send them.
+
+Invitation Text: "{invitation_content}"
+Design Info: "{design_content}"
+
+Your workflow is as follows:
+1.  Review the invitation content to determine if it's for a formal or informal event.
+2.  Choose the correct tool: `whatsapp_message` for informal events or `email_message` for formal ones.
+3.  Call the chosen tool with the invitation text, a subject (for email), and the list of design templates. The design templates can be extracted from the 'Design Info' provided above.""")
+    
+    else: # Fallback, should not happen in the correct flow
+         system_prompt = SystemMessage(content="You are the Communication Agent. Determine the next step based on the conversation history.")
+
+
     all_messages = [system_prompt] + list(messages)
     
-    # Invoke the model to get the response, which may include tool calls.
     response = communication_model.invoke(all_messages)
 
     return {
         "messages": [response],
         "current_agent": "communication", 
-        # If the model's response includes tool calls, the next action is 'tools', otherwise the process ends.
         "next_action": "tools" if response.tool_calls else "end"
     }
