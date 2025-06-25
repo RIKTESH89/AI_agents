@@ -1,6 +1,7 @@
 # scheduler.py
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+# from app import user_input
 from orchestrator import AgentState
 from data import event_planning_data
 
@@ -15,7 +16,7 @@ def scheduler_agent(state: AgentState, scheduler_model) -> AgentState:
     # Updated system prompt reflecting the removal of the 'invite_people' tool.
     system_prompt = SystemMessage(content=f"""You are the Scheduler Agent, responsible for the logistical planning of events.
 
-Your current task is to plan for the user's request: "{user_request}".
+Your current task is to plan for the user's request: "{user_request}". The user has chosen theme: {event_planning_data.get("selected_theme",{})}.
 
 Your goal is to gather all necessary information to create a comprehensive event plan. You have 5 tools at your disposal:
 - calendar: To check availability and schedule dates.
@@ -32,6 +33,48 @@ Read the docstrings of these tools to understand their specific functions. Selec
 Be smart and efficient. After using your tools, the plan will be passed to a human for review before any invitations are drafted or sent.
 Provide arguments for each tool in the correct format. For string-based queries, be descriptive (e.g., "check calendar for weekend availability in late June for a birthday party").""")
     
+    fields_to_check = [
+        'calendar_info',
+        'weather_info',
+        'traffic_info',
+        'finance_info',
+        'health_info'
+    ]
+    
+    if not event_planning_data.get("firstConfirmation") and not event_planning_data.get("calendar_info"):
+        # This is the first time the scheduler is running for this event.
+        # We instruct the model to use the calendar tool first.
+        system_prompt_for_calendar = f"""You are the Scheduler Agent. Your first and only task right now is to check calendar availability for the user's request: "{user_request}".
+Use the `calendar_tool` to check for availability. Be descriptive in your query. After this, you will stop and wait for human confirmation."""
+        
+        # We create a new, focused message list for this specific first step.
+        initial_calendar_check_messages = [
+            SystemMessage(content=system_prompt_for_calendar),
+            HumanMessage(content=f"Check calendar for: {user_request}")
+        ]
+        
+        response = scheduler_model.invoke(initial_calendar_check_messages)
+        
+        # The agent's job here is just to request the tool. The graph will run it.
+        return {
+            "messages": [response],
+            "current_agent": "scheduler",
+            "next_action": "scheduler_tools" if response.tool_calls else "human_review"
+        }
+    
+    elif not event_planning_data.get("firstConfirmation") and event_planning_data.get("calendar_info"):
+        # This is the second time the scheduler is running for this event.
+        # We instruct the model to use the calendar tool again.
+            # print(f"\n\nPlease confirm the time for the event: ") 
+        # while True:
+        user_confirmation = input(f"\n\nPlease confirm the time for the event: Type 'yes' to proceed: ")
+        if user_confirmation.lower() in ["yes", "y", "proceed"]:
+            event_planning_data["firstConfirmation"] = "Done"
+        else:
+            event_planning_data["user_request"] += user_confirmation 
+            
+    # elif all(event_planning_data.get(field) for field in fields_to_check) and event_planning_data.get("invitees"):
+        
     # If scheduling is already marked as complete, pass the turn.
     if event_planning_data.get("current_step") == "scheduling_complete":
         return {

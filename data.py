@@ -12,7 +12,11 @@ event_planning_data = {
     "whatsapp_status": "",
     "email_status": "",
     "design_info": "",  # Added to store design templates
-    "current_step": "start"
+    "current_step": "start",
+    "recommendations": [],
+    "selected_theme": {},
+    "finalTimeConfirmation": "",
+    "invitees": [],
 }
 
 # Weather data for the weather tool

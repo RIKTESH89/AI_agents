@@ -12,16 +12,17 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 # Import agents, tools, and data from other files
 from data import event_planning_data
-from tools import calendar, finance, health, weather, traffic, invite_people, whatsapp_message, email_message, invite_designing
+from tools import calendar, finance, health, weather, traffic, invite_people, whatsapp_message, email_message, invite_designing, research_tool
 from orchestrator import orchestrator_agent, AgentState
 from scheduler import scheduler_agent
 from messaging_agent import communication_agent
 from design_agent import design_agent
+from research_agent import research_agent
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-GEMINI_API_KEY = "#####" # IMPORTANT: Replace with your actual key
+GEMINI_API_KEY = "AIzaSyCZ8sDlFkHfGUP-_ogCFDLOqDaDSsmLY6Y" # IMPORTANT: Replace with your actual key
 GEMINI_MODEL = "gemini-1.5-flash"
 
 OLLAMA_BASE_URL = "http://localhost:11434"
@@ -36,11 +37,13 @@ if not GEMINI_API_KEY:
 
 # Tool lists
 scheduler_tools = [calendar, finance, health, weather, traffic]
+research_tools = [research_tool]
 # The communication agent now has access to all communication-related tools
 communication_tools = [invite_people, whatsapp_message, email_message] 
 design_tools = [invite_designing]
 
 # Tool nodes
+research_tool_node = ToolNode(research_tools)
 scheduler_tool_node = ToolNode(scheduler_tools)
 communication_tool_node = ToolNode(communication_tools)
 design_tool_node = ToolNode(design_tools)
@@ -58,6 +61,7 @@ model = ChatGoogleGenerativeAI(
 # )
 
 # Bind tools to models for each agent
+research_model = model.bind_tools(research_tools)
 scheduler_model = model.bind_tools(scheduler_tools)
 communication_model = model.bind_tools(communication_tools)
 design_model = model.bind_tools(design_tools)
@@ -65,6 +69,10 @@ design_model = model.bind_tools(design_tools)
 # ============================================================================
 # ASYNC AGENT WRAPPERS
 # ============================================================================
+
+async def async_research_agent(state: AgentState, model) -> AgentState:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, research_agent, state, model)
 
 async def async_scheduler_agent(state: AgentState, model) -> AgentState:
     loop = asyncio.get_event_loop()
@@ -83,6 +91,7 @@ async def async_orchestrator_agent(state: AgentState) -> AgentState:
     return await loop.run_in_executor(None, orchestrator_agent, state)
 
 # Partial functions to pass the correct model to each agent
+research_agent_with_model = partial(async_research_agent, model=research_model)
 scheduler_agent_with_model = partial(async_scheduler_agent, model=scheduler_model)
 communication_agent_with_model = partial(async_communication_agent, model=communication_model)
 design_agent_with_model = partial(async_design_agent, model=design_model)
@@ -102,6 +111,7 @@ async def human_review_node(state: AgentState) -> AgentState:
     if last_human_msg:
         user_input = last_human_msg.content.lower().strip()
         if any(keyword in user_input for keyword in ['proceed', 'continue', 'go ahead', 'yes', 'looks good', 'approve']):
+            event_planning_data["current_step"] = "scheduling_complete"
             state["next_action"] = "communication"
             state["messages"].append(AIMessage(content="✅ Plan approved. Proceeding to Communication Agent."))
         else: # Assume any other input is a modification request
@@ -109,7 +119,6 @@ async def human_review_node(state: AgentState) -> AgentState:
             state["messages"].append(AIMessage(content=f"🔄 User requested modifications. Returning to Scheduler."))
     
     state["current_agent"] = "human_review"
-    event_planning_data["current_step"] = "scheduling_complete"
     return state
 
 
@@ -118,7 +127,7 @@ async def human_review_node(state: AgentState) -> AgentState:
 # ============================================================================
 
 def route_after_orchestrator(state: AgentState) -> str:
-    return state.get("next_action", "scheduler")
+    return state.get("next_action")
 
 def route_after_scheduler(state: AgentState) -> str:
     messages = state["messages"]
@@ -169,6 +178,8 @@ def create_event_planning_graph():
     graph.add_node("communication_tools", communication_tool_node)
     graph.add_node("design", design_agent_with_model)
     graph.add_node("design_tools", design_tool_node)
+    graph.add_node("research", research_agent_with_model)
+    graph.add_node("research_tools", research_tool_node)
     
     # Set entry point
     graph.set_entry_point("orchestrator")
@@ -176,8 +187,12 @@ def create_event_planning_graph():
     # --- Define Edges ---
     
     # Orchestrator to Scheduler
-    graph.add_conditional_edges("orchestrator", route_after_orchestrator, {"scheduler": "scheduler", "communication": "communication"})
+    graph.add_conditional_edges("orchestrator", route_after_orchestrator, {"scheduler": "scheduler", "communication": "communication", "research": "research"})
     
+    graph.add_edge("research", "research_tools")
+    graph.add_edge("research_tools", "orchestrator")
+    
+    # Scheduler to Scheduler Tools
     # Scheduler Loop
     graph.add_conditional_edges("scheduler", route_after_scheduler, {"scheduler_tools": "scheduler_tools", "human_review": "human_review"})
     graph.add_edge("scheduler_tools", "scheduler")
