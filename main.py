@@ -22,7 +22,7 @@ from research_agent import research_agent
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-GEMINI_API_KEY = "AIzaSyCZ8sDlFkHfGUP-_ogCFDLOqDaDSsmLY6Y" # IMPORTANT: Replace with your actual key
+GEMINI_API_KEY = "####" # IMPORTANT: Replace with your actual key
 GEMINI_MODEL = "gemini-1.5-flash"
 
 OLLAMA_BASE_URL = "http://localhost:11434"
