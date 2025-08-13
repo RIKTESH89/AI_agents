@@ -344,7 +344,7 @@ def main():
             
             st.success("🎯 Starting medicine reminder check...")
             st.info(f"⏰ Follow-up compliance check scheduled for {task['execute_time'].strftime('%H:%M:%S')} (3 minutes from now)")
-            st.warning("⏳ **Smart scheduling active** - Auto-refresh will activate 10 seconds before the scheduled time")
+            st.warning("🔄 **Auto-refresh enabled** - Page will refresh every 10 seconds to check for scheduled tasks")
         
         # Small spacing
         st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
@@ -380,18 +380,24 @@ def main():
         if pending_tasks or ready_tasks:
             st.header("⏰ Scheduled Tasks")
             
+            # Debug info
+            st.text(f"Debug: Current time = {datetime.now().strftime('%H:%M:%S')}")
+            st.text(f"Debug: Ready tasks = {len(ready_tasks)}, Pending tasks = {len(pending_tasks)}")
+            
             if pending_tasks:
                 st.subheader("🔄 Pending Tasks")
                 for i, task in enumerate(pending_tasks):
                     time_left = task["execute_time"] - datetime.now()
                     minutes_left = max(0, int(time_left.total_seconds() / 60))
                     seconds_left = max(0, int(time_left.total_seconds() % 60))
+                    total_seconds_left = time_left.total_seconds()
                     
                     st.markdown(f"""
                     **Task {i+1}:** Follow-up compliance check  
-                    ⏱️ **Time remaining:** {minutes_left}m {seconds_left}s  
+                    ⏱️ **Time remaining:** {minutes_left}m {seconds_left}s ({total_seconds_left:.1f}s total)  
                     🎯 **Scheduled for:** {task['execute_time'].strftime('%H:%M:%S')}  
-                    📝 **Action:** Medication compliance follow-up
+                    📝 **Action:** Medication compliance follow-up  
+                    🔧 **Status:** {task['status']}
                     """)
                     
                     # Progress bar showing time until execution
@@ -404,6 +410,7 @@ def main():
                 st.subheader("✅ Ready to Execute")
                 for task in ready_tasks:
                     st.success(f"Task ready: {task['prompt'][:50]}...")
+                    st.text(f"Debug: Task status = {task['status']}")
         
         # Add some spacing
         st.markdown("<br>", unsafe_allow_html=True)
@@ -414,26 +421,24 @@ def main():
     # Auto-refresh mechanism for scheduled tasks using st_autorefresh
     ready_tasks, pending_tasks = check_scheduled_tasks()
     
-    # Only enable auto-refresh when tasks are within 10 seconds of execution time
-    if pending_tasks:
-        # Check if any task is close to execution (within 10 seconds)
+    # Always enable auto-refresh if we have any pending or ready tasks
+    if pending_tasks or ready_tasks:
         current_time = datetime.now()
-        close_to_execution = False
-        for task in pending_tasks:
-            time_until_execution = (task["execute_time"] - current_time).total_seconds()
-            if time_until_execution <= 10:  # Within 10 seconds
-                close_to_execution = True
-                break
         
-        if close_to_execution:
-            st.info("🔄 **Auto-refresh active** - Scheduled task executing soon...")
-            st_autorefresh(interval=2000, key="autorefresh_scheduled_tasks")  # 2 seconds when close to execution
-        else:
-            st.info("⏳ **Task scheduled** - Auto-refresh will activate 10 seconds before execution")
-    elif ready_tasks:
-        # If we have ready tasks, refresh immediately to execute them
-        st.success("⏰ **Executing scheduled tasks now...**")
-        st_autorefresh(interval=100, key="autorefresh_ready_tasks", limit=1)  # Single immediate refresh
+        if ready_tasks:
+            st.success("⏰ **Executing scheduled tasks now...**")
+            st_autorefresh(interval=1000, key="autorefresh_ready_tasks")  # 1 second refresh for ready tasks
+        elif pending_tasks:
+            # Find the earliest task
+            earliest_task = min(pending_tasks, key=lambda x: x["execute_time"])
+            time_until_execution = (earliest_task["execute_time"] - current_time).total_seconds()
+            
+            if time_until_execution <= 15:  # Within 15 seconds
+                st.info("🔄 **Auto-refresh active** - Scheduled task executing soon...")
+                st_autorefresh(interval=1000, key="autorefresh_scheduled_tasks")  # 1 second when close
+            else:
+                st.info("⏳ **Task scheduled** - Auto-refresh will activate when task is ready")
+                st_autorefresh(interval=10000, key="autorefresh_waiting")  # 10 second check while waiting
     
     # Check for scheduled tasks that are ready to execute
     ready_tasks, _ = check_scheduled_tasks()
