@@ -25,6 +25,8 @@ if "scheduled_tasks" not in st.session_state:
     st.session_state.scheduled_tasks = []
 if "last_check_time" not in st.session_state:
     st.session_state.last_check_time = datetime.now()
+if "processing_agent" not in st.session_state:
+    st.session_state.processing_agent = False
 
 def display_agent_thinking(agent_name, tool_name=None):
     """Display thinking status for agents."""
@@ -419,31 +421,37 @@ def main():
     st.header("💬 Chat with DailyUX AI")
     
     # Auto-refresh mechanism for scheduled tasks using st_autorefresh
-    ready_tasks, pending_tasks = check_scheduled_tasks()
-    
-    # Always enable auto-refresh if we have any pending or ready tasks
-    if pending_tasks or ready_tasks:
-        current_time = datetime.now()
+    # Only enable auto-refresh if we're not currently processing an agent response
+    if not st.session_state.processing_agent:
+        ready_tasks, pending_tasks = check_scheduled_tasks()
         
-        if ready_tasks:
-            st.success("⏰ **Executing scheduled tasks now...**")
-            st_autorefresh(interval=1000, key="autorefresh_ready_tasks")  # 1 second refresh for ready tasks
-        elif pending_tasks:
-            # Find the earliest task
-            earliest_task = min(pending_tasks, key=lambda x: x["execute_time"])
-            time_until_execution = (earliest_task["execute_time"] - current_time).total_seconds()
+        # Only enable auto-refresh if we have pending or ready tasks
+        if pending_tasks or ready_tasks:
+            current_time = datetime.now()
             
-            if time_until_execution <= 15:  # Within 15 seconds
-                st.info("🔄 **Auto-refresh active** - Scheduled task executing soon...")
-                st_autorefresh(interval=1000, key="autorefresh_scheduled_tasks")  # 1 second when close
-            else:
-                st.info("⏳ **Task scheduled** - Auto-refresh will activate when task is ready")
-                st_autorefresh(interval=10000, key="autorefresh_waiting")  # 10 second check while waiting
+            if ready_tasks:
+                st.success("⏰ **Executing scheduled tasks now...**")
+                # Don't use auto-refresh for ready tasks, just execute them directly
+            elif pending_tasks:
+                # Find the earliest task
+                earliest_task = min(pending_tasks, key=lambda x: x["execute_time"])
+                time_until_execution = (earliest_task["execute_time"] - current_time).total_seconds()
+                
+                if time_until_execution <= 15:  # Within 15 seconds
+                    st.info("🔄 **Auto-refresh active** - Scheduled task executing soon...")
+                    st_autorefresh(interval=2000, key="autorefresh_scheduled_tasks")  # 2 seconds when close
+                else:
+                    st.info("⏳ **Task scheduled** - Auto-refresh will activate when task is ready")
+                    st_autorefresh(interval=10000, key="autorefresh_waiting")  # 10 second check while waiting
     
-    # Check for scheduled tasks that are ready to execute
-    ready_tasks, _ = check_scheduled_tasks()
-    for task in ready_tasks:
-        execute_scheduled_task(task)
+    # Check for scheduled tasks that are ready to execute (only if not processing)
+    if not st.session_state.processing_agent:
+        ready_tasks, _ = check_scheduled_tasks()
+        for task in ready_tasks:
+            st.info(f"Debug: Executing ready task with status: {task['status']}")
+            execute_scheduled_task(task)
+            st.success(f"Debug: Task executed, new status: {task['status']}")
+            # No need for st.rerun() here - let the normal flow handle it
     
     # Display existing chat history first
     for message in st.session_state.messages:
@@ -457,6 +465,7 @@ def main():
     # Handle quick action buttons
     if st.session_state.get("trigger_quick_action", False) and st.session_state.get("quick_action_prompt"):
         prompt = st.session_state.quick_action_prompt
+        st.session_state.processing_agent = True  # Set processing flag
         
         # Show processing indicator
         with st.status(f"🚀 Processing quick action...", expanded=True):
@@ -475,13 +484,15 @@ def main():
             with st.chat_message("assistant"):
                 stream_agent_response(prompt)
         
-        # Reset quick action flags
+        # Reset flags
         st.session_state.trigger_quick_action = False
         st.session_state.quick_action_prompt = None
+        st.session_state.processing_agent = False  # Clear processing flag
     
     # Handle scheduled action execution
     if st.session_state.get("trigger_scheduled_action", False) and st.session_state.get("scheduled_action_prompt"):
         scheduled_prompt = st.session_state.scheduled_action_prompt
+        st.session_state.processing_agent = True  # Set processing flag
         
         # Show processing indicator for scheduled task
         with st.status("⏰ Executing scheduled follow-up...", expanded=True):
@@ -498,12 +509,14 @@ def main():
             with st.chat_message("assistant"):
                 stream_agent_response(scheduled_prompt)
         
-        # Reset scheduled action flags
+        # Reset flags
         st.session_state.trigger_scheduled_action = False
         st.session_state.scheduled_action_prompt = None
+        st.session_state.processing_agent = False  # Clear processing flag
     
     # Chat input
     if prompt := st.chat_input("Ask about medications, emergencies, or send messages..."):
+        st.session_state.processing_agent = True  # Set processing flag
         
         # Add user message to session state
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -515,6 +528,8 @@ def main():
         # Stream agent response
         with st.chat_message("assistant"):
             stream_agent_response(prompt)
+            
+        st.session_state.processing_agent = False  # Clear processing flag
     
 
 if __name__ == "__main__":
